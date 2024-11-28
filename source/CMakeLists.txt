@@ -1,2 +1,7 @@
 add_executable(main main.cpp)
 target_link_libraries(main PUBLIC openblas)
+if(APPLE)
+    target_compile_definitions(main PUBLIC "APPLE=1")
+else()
+    target_compile_definitions(main PUBLIC "LINUX=1")
+endif()

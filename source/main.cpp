@@ -3,8 +3,12 @@
 #include <iostream>
 #include <thread>
 
+#if APPLE
 #include <simd/simd.h>
 #include <vecLib/vDSP.h>
+#else
+#include <immintrin.h>
+#endif
 
 constexpr size_t M = 1024;
 constexpr size_t N = 1024;
@@ -56,7 +60,6 @@ void gemm_transpose(float *a, float *b, float *c) {
       c[i * M + j] = 0.0f;
       for (size_t k = 0; k < M; k++) {
         c[i * M + j] += a[i * M + k] * b[j * M + k];
-        // c[i * M + j] = simd_muladd(a[i * M + k], b[j * M + k], c[i * M + j]);
       }
     }
   }
@@ -84,12 +87,16 @@ void gemm_transpose_thread_simd_dot(float *a, float *b, float *c, size_t index,
       float tmp_buffer[buffer_size];
 #pragma unroll
       for (size_t k = 0, b_i = 0; k < M; k += fp_vec_size, b_i++) {
+#if APPLE
         tmp_buffer[b_i] = simd::dot(*(simd::float16 *)(a + (i * M + k)),
                                     *(simd::float16 *)(b + (j * M + k)));
+#endif
       }
 #pragma unroll
       for (size_t x = 0; x < buffer_size; x += fp_vec_size) {
+#if APPLE
         c[i * M + j] += simd::reduce_add(*(simd::float16 *)(tmp_buffer + x));
+#endif
       }
     }
   }
@@ -108,15 +115,6 @@ bool validate(float *a, float *b) {
   }
   return true;
 }
-
-// int main() {
-//   float *a = new float[M * N]; // Input: a
-//   float *t_a = new float[M * N];
-//   populate_values(a, t_a);
-//   transpose(t_a, a);
-//   print_matrix(a);
-//   print_matrix(t_a);
-// }
 
 int main() {
   auto get_time = std::chrono::high_resolution_clock::now;
@@ -162,7 +160,7 @@ int main() {
   std::memset(my_c, 0, sizeof(float) * M * N);
 
   // GEMM transposed but on threaded
-  auto thread_count = std::thread::hardware_concurrency();
+  auto thread_count = std::thread::hardware_concurrency() < 8 ? 4 : 8;
   auto transpose_gemm_thread_start = get_time();
   std::vector<std::thread> tgemm_threads;
   tgemm_threads.reserve(thread_count);
@@ -203,6 +201,7 @@ int main() {
     std::abort();
   }
 
+#if APPLE
   // clear result
   std::memset(my_c, 0, sizeof(float) * M * N);
 
@@ -215,6 +214,7 @@ int main() {
     std::cout << "Transpose gemm simd thread failed" << std::endl;
     std::abort();
   }
+#endif
 
   auto blas_time =
       duration_cast<std::chrono::milliseconds>(blas_end - blas_start);
@@ -228,20 +228,25 @@ int main() {
       duration_cast<std::chrono::milliseconds>(
           transpose_gemm_thread_simd_dot_end -
           transpose_gemm_thread_simd_dot_start);
+#if APPLE
   auto dsp_time = duration_cast<std::chrono::milliseconds>(dsp_end - dsp_start);
+#endif
 
   std::cout << "Matrix multiplication size: " << M << " * " << N << std::endl;
-  std::cout << "Trivial   Gemm time                 : " << stupid_gemm_time
-            << std::endl;
-  std::cout << "Transpose Gemm time                 : " << transpose_gemm_time
-            << std::endl;
-  std::cout << "Transpose Gemm thread time          : "
+  std::cout << "Trivial   Gemm time                          : "
+            << stupid_gemm_time << std::endl;
+  std::cout << "Transpose matrix B Gemm time                 : "
+            << transpose_gemm_time << std::endl;
+  std::cout << "Transpose matrix B + threads Gemm time       : "
             << transpose_gemm_thread_time << std::endl;
-  std::cout << "Transpose Gemm thread simd dot time : "
+  std::cout << "Transpose matrix B + threads + simd dot time : "
             << transpose_gemm_simd_thread_dot_time << std::endl;
-  std::cout << "vDSP time                           : " << dsp_time << std::endl;
-  std::cout << "OpenBlas time                       : " << blas_time
+  std::cout << "OpenBlas library gemm time                   : " << blas_time
             << std::endl;
+#if APPLE
+  std::cout << "vDSP (Apple's DSP) time                      : " << dsp_time
+            << std::endl;
+#endif
 
   delete[] a;
   delete[] b;
