@@ -1,5 +1,15 @@
 add_executable(main main.cpp)
 target_link_libraries(main PUBLIC openblas)
+
+if(NVIDIA)
+    target_compile_definitions(main PUBLIC "NVIDIA=1")
+    target_link_libraries(main PUBLIC cublas)
+endif()
+if(ROCM)
+    target_compile_definitions(main PUBLIC "ROCM=1")
+    target_link_libraries(main PUBLIC rocblas)
+endif()
+
 if(APPLE)
     target_compile_definitions(main PUBLIC "APPLE=1")
 else()
